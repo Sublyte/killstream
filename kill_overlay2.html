@@ -49,16 +49,27 @@
     <div class="title">Most Recent Kill</div>
     <a href="#" target="_blank" id="recent-kill-link">Loading...</a>
   </div>
+  <div class="entry" id="valuable-kill">
+    <div class="title">Most Valuable Kill</div>
+    <a href="#" target="_blank" id="valuable-kill-link">Loading...</a>
+  </div>
   <div class="entry" id="session-isk">
     <div class="title">Session ISK Destroyed</div>
-    <div class="isk" id="session-isk-amount">0 ISK</div>
+    <div class="isk" id="session-isk-value">0 ISK</div>
+  </div>
+  <div class="entry" id="alltime-isk">
+    <div class="title">All-Time ISK Destroyed</div>
+    <div class="isk" id="alltime-isk-value">Loading...</div>
   </div>
 </div>
 
 <script>
-  const characterID = 1055638545; // T'KNaath
-  const refreshInterval = 15000; // 15 seconds
-  let sessionKillIDs = new Set();
+  const characterID = 1055638545;
+  const refreshInterval = 15000;
+  const proxyBase = 'https://eve-kill-proxy.onrender.com/proxy?url=';
+
+  const shipNameCache = {};
+  window.sessionKillIDs = new Set();
   let sessionISK = 0;
 
   function formatISK(value) {
@@ -66,59 +77,73 @@
     if (value >= 1e12) return (value / 1e12).toFixed(2) + ' T ISK';
     if (value >= 1e9) return (value / 1e9).toFixed(2) + ' B ISK';
     if (value >= 1e6) return (value / 1e6).toFixed(2) + ' M ISK';
+    if (value >= 1e3) return (value / 1e3).toFixed(2) + ' k ISK';
     return Math.floor(value) + ' ISK';
   }
 
-  async function fetchRecentKills() {
-    const url = `https://zkillboard.com/api/kills/characterID/${characterID}/?limit=10`;
+  async function fetchJSON(url) {
     try {
-      const res = await fetch(url);
-      return await res.json();
-    } catch (e) {
-      console.error('Error fetching killmail summaries:', e);
-      return [];
-    }
-  }
-
-  async function fetchFullKillmail(id, hash) {
-    const url = `https://esi.evetech.net/latest/killmails/${id}/${hash}/`;
-    try {
-      const res = await fetch(url);
-      return await res.json();
-    } catch (e) {
-      console.error(`Failed fetching full killmail ${id}:`, e);
+      const response = await fetch(proxyBase + encodeURIComponent(url));
+      if (!response.ok) throw new Error('Fetch failed');
+      return await response.json();
+    } catch (err) {
+      console.error('Fetch error:', err);
       return null;
     }
   }
 
+  async function getShipName(typeID) {
+    if (shipNameCache[typeID]) return shipNameCache[typeID];
+    const data = await fetchJSON(`https://esi.evetech.net/latest/universe/types/${typeID}/`);
+    const name = data?.name || `Ship ID ${typeID}`;
+    shipNameCache[typeID] = name;
+    return name;
+  }
+
+  function getMostValuable(kills) {
+    return kills.reduce((max, kill) => kill.zkb.totalValue > (max?.zkb?.totalValue || 0) ? kill : max, null);
+  }
+
+  function getMostRecent(kills) {
+    return kills[0]; // API is ordered by most recent first
+  }
+
+  async function setKillElement(id, kill) {
+    const elem = document.getElementById(id);
+    const link = elem.querySelector('a');
+    if (!kill) {
+      link.textContent = 'No kills';
+      link.href = '#';
+      return;
+    }
+    const shipName = await getShipName(kill.victim.shipTypeID);
+    const iskValue = formatISK(kill.zkb.totalValue);
+    link.textContent = `${shipName} - ${iskValue}`;
+    link.href = `https://zkillboard.com/kill/${kill.killID}/`;
+  }
+
   async function updateOverlay() {
-    const kills = await fetchRecentKills();
-    if (!kills.length) return;
-
-    const validKill = kills.find(k => k.zkb?.hash);
-    if (!validKill) return;
-
-    const killID = validKill.killmail_id;
-    const hash = validKill.zkb.hash;
-
-    const killmail = await fetchFullKillmail(killID, hash);
-    if (!killmail) return;
-
-    const victim = killmail.victim;
-    const shipType = victim.ship_type_id;
-    const totalISK = validKill.zkb.totalValue || 0;
-
-    // Update most recent kill info
-    const link = document.getElementById('recent-kill-link');
-    link.textContent = `Ship Type ID ${shipType} - ${formatISK(totalISK)}`;
-    link.href = `https://zkillboard.com/kill/${killID}/`;
+    const kills = await fetchJSON(`https://zkillboard.com/api/kills/characterID/${characterID}/?limit=50`);
+    if (!kills || !Array.isArray(kills)) return;
 
     // Update session ISK
-    if (!sessionKillIDs.has(killID)) {
-      sessionKillIDs.add(killID);
-      sessionISK += totalISK;
+    for (const kill of kills) {
+      if (!window.sessionKillIDs.has(kill.killID)) {
+        window.sessionKillIDs.add(kill.killID);
+        sessionISK += kill.zkb.totalValue || 0;
+      }
     }
-    document.getElementById('session-isk-amount').textContent = formatISK(sessionISK);
+
+    // Most recent and valuable kills
+    await setKillElement('recent-kill', getMostRecent(kills));
+    await setKillElement('valuable-kill', getMostValuable(kills));
+
+    // Update session ISK text
+    document.getElementById('session-isk-value').textContent = formatISK(sessionISK);
+
+    // Update all-time ISK
+    const stats = await fetchJSON(`https://zkillboard.com/api/stats/characterID/${characterID}/`);
+    document.getElementById('alltime-isk-value').textContent = formatISK(stats?.totalISKDestroyed || 0);
   }
 
   updateOverlay();
