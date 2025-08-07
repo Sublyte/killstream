@@ -105,7 +105,7 @@
   }
 
   function getMostRecent(kills) {
-    return kills[0]; // API is ordered by most recent first
+    return kills[0];
   }
 
   async function setKillElement(id, kill) {
@@ -119,29 +119,24 @@
     const shipName = await getShipName(kill.victim.shipTypeID);
     const iskValue = formatISK(kill.zkb.totalValue);
     link.textContent = `${shipName} - ${iskValue}`;
-    link.href = `https://zkillboard.com/kill/${kill.killID}/`;
+    link.href = `https://zkillboard.com/kill/${kill.killmail_id}/`;
   }
 
   async function updateOverlay() {
     const kills = await fetchJSON(`https://zkillboard.com/api/kills/characterID/${characterID}/?limit=50`);
     if (!kills || !Array.isArray(kills)) return;
 
-    // Update session ISK
     for (const kill of kills) {
-      if (!window.sessionKillIDs.has(kill.killID)) {
-        window.sessionKillIDs.add(kill.killID);
+      if (!window.sessionKillIDs.has(kill.killmail_id)) {
+        window.sessionKillIDs.add(kill.killmail_id);
         sessionISK += kill.zkb.totalValue || 0;
       }
     }
 
-    // Most recent and valuable kills
     await setKillElement('recent-kill', getMostRecent(kills));
     await setKillElement('valuable-kill', getMostValuable(kills));
-
-    // Update session ISK text
     document.getElementById('session-isk-value').textContent = formatISK(sessionISK);
 
-    // Update all-time ISK
     const stats = await fetchJSON(`https://zkillboard.com/api/stats/characterID/${characterID}/`);
     document.getElementById('alltime-isk-value').textContent = formatISK(stats?.totalISKDestroyed || 0);
   }
