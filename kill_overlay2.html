@@ -8,7 +8,7 @@
   body {
     margin: 0;
     padding: 10px;
-    font-family: 'Orbitron', sans-serif;
+    font-family: 'Orbitron', sans-serif, monospace;
     background: transparent;
     color: #e0e0e0;
     user-select: none;
@@ -89,12 +89,11 @@
   }
 
   async function fetchKills() {
-    const url = `https://zkillboard.com/api/kills/characterID/${characterID}/limit/50/`;
+    const url = `https://zkillboard.com/api/kills/characterID/${characterID}/?limit=50`;
     try {
       const response = await fetch(proxyBase + encodeURIComponent(url));
       if (!response.ok) throw new Error('Failed to fetch kills');
-      const data = await response.json();
-      return data;
+      return await response.json();
     } catch (e) {
       console.error('Fetch kills error:', e);
       return [];
@@ -106,8 +105,7 @@
     try {
       const response = await fetch(proxyBase + encodeURIComponent(url));
       if (!response.ok) throw new Error('Failed to fetch stats');
-      const data = await response.json();
-      return data;
+      return await response.json();
     } catch (e) {
       console.error('Fetch stats error:', e);
       return null;
@@ -115,19 +113,20 @@
   }
 
   function filterPods(kills) {
-    return kills.filter(k => k.victim.shipTypeID === 670);
+    return kills.filter(k => k.victim.shipTypeID === 670); // Capsule/Pod
   }
-
   function filterNonPods(kills) {
     return kills.filter(k => k.victim.shipTypeID !== 670);
   }
 
   function getMostValuable(kills) {
+    if (!kills.length) return null;
     return kills.reduce((max, kill) => (kill.zkb.totalValue > (max?.zkb?.totalValue || 0) ? kill : max), null);
   }
 
   function getMostRecent(kills) {
-    return kills.length ? kills[0] : null;
+    if (!kills.length) return null;
+    return kills[0];
   }
 
   function setKillElement(id, kill) {
@@ -146,7 +145,10 @@
 
   async function updateOverlay() {
     const kills = await fetchKills();
-    if (!kills.length) return;
+    if (!kills.length) {
+      console.log('No kills found');
+      return;
+    }
 
     kills.forEach(kill => {
       if (!window.sessionKillIDs.has(kill.killID) && kill.victim.shipTypeID !== 670) {
@@ -155,17 +157,22 @@
       }
     });
 
+    // Update kill entries
     setKillElement('recent-kill', getMostRecent(filterNonPods(kills)));
     setKillElement('valuable-kill', getMostValuable(filterNonPods(kills)));
     setKillElement('recent-pod', getMostRecent(filterPods(kills)));
     setKillElement('valuable-pod', getMostValuable(filterPods(kills)));
 
+    // Session ISK
     document.querySelector('#session-isk .isk').textContent = formatISK(sessionISK);
 
+    // All-time ISK
     const stats = await fetchStats();
-    document.querySelector('#alltime-isk .isk').textContent = stats?.totalISKDestroyed
-      ? formatISK(stats.totalISKDestroyed)
-      : 'N/A';
+    if (stats && stats.totalISKDestroyed) {
+      document.querySelector('#alltime-isk .isk').textContent = formatISK(stats.totalISKDestroyed);
+    } else {
+      document.querySelector('#alltime-isk .isk').textContent = 'N/A';
+    }
   }
 
   updateOverlay();
