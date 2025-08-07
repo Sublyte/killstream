@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EVE Killboard Overlay</title>
+<style>
+  body {
+    margin: 0;
+    padding: 10px;
+    font-family: 'Orbitron', sans-serif;
+    background: transparent;
+    color: #e0e0e0;
+    user-select: none;
+    width: 300px;
+  }
+  a {
+    color: #60c0ff;
+    text-decoration: none;
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+  .container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .entry {
+    background: rgba(10, 10, 20, 0.7);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .title {
+    font-weight: bold;
+    margin-bottom: 4px;
+    font-size: 15px;
+  }
+  .isk {
+    font-family: monospace;
+    color: #ffd700;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="entry" id="recent-kill">
+    <div class="title">Most Recent Kill</div>
+    <a href="#" target="_blank" id="recent-kill-link">Loading...</a>
+  </div>
+  <div class="entry" id="valuable-kill">
+    <div class="title">Most Valuable Kill</div>
+    <a href="#" target="_blank" id="valuable-kill-link">Loading...</a>
+  </div>
+  <div class="entry" id="recent-pod">
+    <div class="title">Most Recent Pod Kill</div>
+    <a href="#" target="_blank" id="recent-pod-link">Loading...</a>
+  </div>
+  <div class="entry" id="valuable-pod">
+    <div class="title">Most Valuable Pod Kill</div>
+    <a href="#" target="_blank" id="valuable-pod-link">Loading...</a>
+  </div>
+  <div class="entry" id="session-isk">
+    <div class="title">Session ISK Destroyed</div>
+    <div class="isk">0 ISK</div>
+  </div>
+  <div class="entry" id="alltime-isk">
+    <div class="title">All-Time ISK Destroyed</div>
+    <div class="isk">Loading...</div>
+  </div>
+</div>
+
+<script>
+  const characterID = 1055638545; // T'KNaath
+  const refreshInterval = 10000; // 10 seconds
+
+  // Keep track of kills for session ISK
+  window.sessionKillIDs = new Set();
+  let sessionISK = 0;
+
+  function formatISK(value) {
+    if (!value) return '0 ISK';
+    if (value >= 1e12) return (value / 1e12).toFixed(2) + ' T ISK';
+    if (value >= 1e9) return (value / 1e9).toFixed(2) + ' B ISK';
+    if (value >= 1e6) return (value / 1e6).toFixed(2) + ' M ISK';
+    if (value >= 1e3) return (value / 1e3).toFixed(2) + ' k ISK';
+    return Math.floor(value) + ' ISK';
+  }
+
+  async function fetchKills() {
+    const urlFull = `https://zkillboard.com/api/kills/characterID/${characterID}/limit/50/`;
+    try {
+      const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(urlFull)}`);
+      if (!response.ok) throw new Error('Failed to fetch kills');
+      const data = await response.json();
+      return data;
+    } catch (e) {
+      console.error('Fetch kills error:', e);
+      return [];
+    }
+  }
+
+  async function fetchStats() {
+    const url = `https://zkillboard.com/api/stats/characterID/${characterID}/`;
+    try {
+      const response = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+      if (!response.ok) throw new Error('Failed to fetch stats');
+      const data = await response.json();
+      return data;
+    } catch (e) {
+      console.error('Fetch stats error:', e);
+      return null;
+    }
+  }
+
+  function filterPods(kills) {
+    return kills.filter(k => k.victim.shipTypeID === 670); // 670 = Capsule/Pod
+  }
+  function filterNonPods(kills) {
+    return kills.filter(k => k.victim.shipTypeID !== 670);
+  }
+
+  function getMostValuable(kills) {
+    if (!kills.length) return null;
+    return kills.reduce((max, kill) => (kill.zkb.totalValue > (max?.zkb?.totalValue || 0) ? kill : max), null);
+  }
+
+  function getMostISK(kills) {
+    return kills.reduce((total, kill) => total + (kill.zkb?.totalValue || 0), 0);
+  }
+
+  function getMostRecent(kills) {
+    if (!kills.length) return null;
+    return kills[0]; // API returns most recent first
+  }
+
+  function setKillElement(id, kill) {
+    const elem = document.getElementById(id);
+    const link = elem.querySelector('a');
+    if (!kill) {
+      link.textContent = 'No kills';
+      link.href = '#';
+      return;
+    }
+    const shipName = kill.victim.shipTypeName || 'Unknown Ship';
+    const iskValue = formatISK(kill.zkb.totalValue);
+    link.textContent = `${shipName} - ${iskValue}`;
+    link.href = `https://zkillboard.com/kill/${kill.killID}/`;
+  }
+
+  async function updateOverlay() {
+    const kills = await fetchKills();
+    if (!kills.length) return;
+
+    // Session ISK update
+    kills.forEach(kill => {
+      if (!window.sessionKillIDs.has(kill.killID) && kill.victim.shipTypeID !== 670) {
+        window.sessionKillIDs.add(kill.killID);
+        sessionISK += kill.zkb.totalValue;
+      }
+    });
+
+    // Most recent kill (non-pod)
+    const recentNonPod = getMostRecent(filterNonPods(kills));
+    setKillElement('recent-kill', recentNonPod);
+
+    // Most valuable kill (non-pod)
+    const valuableNonPod = getMostValuable(filterNonPods(kills));
+    setKillElement('valuable-kill', valuableNonPod);
+
+    // Most recent pod
+    const recentPod = getMostRecent(filterPods(kills));
+    setKillElement('recent-pod', recentPod);
+
+    // Most valuable pod
+    const valuablePod = getMostValuable(filterPods(kills));
+    setKillElement('valuable-pod', valuablePod);
+
+    // Session ISK
+    document.querySelector('#session-isk .isk').textContent = formatISK(sessionISK);
+
+    // All-time ISK destroyed
+    const stats = await fetchStats();
+    if (stats && stats.totalISKDestroyed) {
+      document.querySelector('#alltime-isk .isk').textContent = formatISK(stats.totalISKDestroyed);
+    } else {
+      document.querySelector('#alltime-isk .isk').textContent = 'N/A';
+    }
+  }
+
+  updateOverlay();
+  setInterval(updateOverlay, refreshInterval);
+</script>
+</body>
+</html>
