@@ -74,7 +74,7 @@
 <script>
   const characterID = 1055638545; // T'KNaath
   const refreshInterval = 10000; // 10 seconds
-  const proxyBase = 'https://eve-kill-proxy.onrender.com';
+  const proxyBase = 'https://eve-kill-proxy.onrender.com/proxy?url=';
 
   window.sessionKillIDs = new Set();
   let sessionISK = 0;
@@ -89,11 +89,12 @@
   }
 
   async function fetchKills() {
-    const url = `${proxyBase}/api/kills/characterID/${characterID}/limit/50/`;
+    const url = `https://zkillboard.com/api/kills/characterID/${characterID}/limit/50/`;
     try {
-      const response = await fetch(url);
+      const response = await fetch(proxyBase + encodeURIComponent(url));
       if (!response.ok) throw new Error('Failed to fetch kills');
-      return await response.json();
+      const data = await response.json();
+      return data;
     } catch (e) {
       console.error('Fetch kills error:', e);
       return [];
@@ -101,11 +102,12 @@
   }
 
   async function fetchStats() {
-    const url = `${proxyBase}/api/stats/characterID/${characterID}/`;
+    const url = `https://zkillboard.com/api/stats/characterID/${characterID}/`;
     try {
-      const response = await fetch(url);
+      const response = await fetch(proxyBase + encodeURIComponent(url));
       if (!response.ok) throw new Error('Failed to fetch stats');
-      return await response.json();
+      const data = await response.json();
+      return data;
     } catch (e) {
       console.error('Fetch stats error:', e);
       return null;
@@ -115,6 +117,7 @@
   function filterPods(kills) {
     return kills.filter(k => k.victim.shipTypeID === 670);
   }
+
   function filterNonPods(kills) {
     return kills.filter(k => k.victim.shipTypeID !== 670);
   }
@@ -124,7 +127,7 @@
   }
 
   function getMostRecent(kills) {
-    return kills[0];
+    return kills.length ? kills[0] : null;
   }
 
   function setKillElement(id, kill) {
@@ -156,10 +159,13 @@
     setKillElement('valuable-kill', getMostValuable(filterNonPods(kills)));
     setKillElement('recent-pod', getMostRecent(filterPods(kills)));
     setKillElement('valuable-pod', getMostValuable(filterPods(kills)));
+
     document.querySelector('#session-isk .isk').textContent = formatISK(sessionISK);
 
     const stats = await fetchStats();
-    document.querySelector('#alltime-isk .isk').textContent = stats?.totalISKDestroyed ? formatISK(stats.totalISKDestroyed) : 'N/A';
+    document.querySelector('#alltime-isk .isk').textContent = stats?.totalISKDestroyed
+      ? formatISK(stats.totalISKDestroyed)
+      : 'N/A';
   }
 
   updateOverlay();
